@@ -9,24 +9,144 @@ output: html_document
 
 library(tidyverse)
 library(p8105.datasets)
+library(broom)
+library(modelr)
+library(dplyr)
+library(SemiPar)
+library(mgcv)
+library(purrr)
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-## Problem 1
+## Problem 2
+
+Cleaning up the homicide dataset. Here , we are adding the new `city_state` variable, creating a variable for solved/unsolved cases, and removing Dallas,TX, Phoenix,AZ, Kansas City, MO, and Tulsa, AL. I filtered the dataset to only include `victim_race` with Black and White. I change the `victim_age` variable to numeric. 
 
 ```{r}
-weather_df = 
-  rnoaa::meteo_pull_monitors(
-    c("USW00094728"),
-    var = c("PRCP", "TMIN", "TMAX"), 
-    date_min = "2017-01-01",
-    date_max = "2017-12-31") %>%
-  mutate(
-    name = recode(id, USW00094728 = "CentralPark_NY"),
-    tmin = tmin / 10,
-    tmax = tmax / 10) %>%
-  select(name, id, everything())
+
+Homicide = read_csv("homicide-data.csv")
+
+homicide_new = 
+  Homicide |> 
+  mutate(city_state = paste(city, state, sep = ",")) |> 
+  mutate(case_solved = ifelse(disposition == "Closed by arrest", "1", "0")) |> 
+  filter(!city_state %in% c("Dallas,TX", "Phoenix,AZ", "Kansas City,MO", "Tulsa,AL")) |> 
+  filter(victim_race %in% c("White", "Black")) |> 
+  mutate(victim_age = as.numeric(victim_age)) |> 
+  mutate(case_solved = as.numeric(case_solved))
+
 ```
 
+
+Running `glm` for Baltimore,MD, with race, sex, and age as predictor variables. 
+```{r}
+
+Baltimore_df = 
+  homicide_new |> 
+  filter(city_state == "Baltimore,MD")
+
+fit_logistic = 
+  Baltimore_df |> 
+  glm(case_solved ~ victim_age + victim_race + victim_sex, data =_, family = binomial())
+
+fit_logistic |> 
+  broom::tidy() |> 
+  mutate(OR = exp(estimate)) |> 
+  select(term, log_OR = estimate, OR, p.value) |> 
+  knitr::kable(digits = 3)
+
+```
+
+Getting the odds ratio for female vs. male. 
+```{r}
+
+OR_sex = tidy(fit_logistic)
+
+OR_sex |>
+  filter(term == "victim_sexMale") |> 
+  mutate(odds_ratio = exp(estimate),
+    ci_low = exp(estimate - 1.96 * std.error), 
+    ci_high = exp(estimate + 1.96 * std.error)) |> 
+  knitr::kable(digits = 4)
+
+```
+
+The odds of solving the case for male victims are 0.426 times the odds of solving a case for female victims, after controlling for age and race.We are 95% confident that the true odds ratio lies between 0.3245 and 0.5579.  
+
+```{r, warning=FALSE}
+
+All_cities = homicide_new |> 
+  group_by(city_state) |> 
+  nest() |>
+  mutate(
+    model =
+      map(data, ~glm(case_solved ~ victim_age + victim_race + victim_sex, data=.x, family = binomial())),
+    final_model= map(model, ~broom::tidy(.x, conf.int =TRUE, exponentiate = TRUE)))|> 
+  unnest(cols = final_model) |> 
+    filter(term == "victim_sexMale") |>
+  select(city_state, estimate, conf.low, conf.high)
+  
+```
+
+
+```{r}
+ggplot(All_cities, aes(x = reorder(city_state, estimate), y = estimate)) +
+  geom_point(color = "pink") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  coord_flip() +
+  xlab("City") +
+  ylab("Sex Odds Ratio") +
+  theme_minimal() +
+  ggtitle("Estimated Odds Ratios (ORs) and 95% Confidence Intervals for Each City")
+```
+
+## Problem 3
+
+Loading in the birthweight dataset. 
+
+```{r}
+birthweight = read_csv("birthweight.csv",  na = c("", "NA","."))
+
+view(birthweight)
+
+```
+
+Below, I am building my model. The variables I added in my model were based on the impact of structural racism on birthweight. Black women in particular are more likely to have low birthweight babies, especially if they live in neighborhoods that were historically redlined. 
+
+```{r}
+bwt_model = lm(bwt ~ mrace +  wtgain + gaweeks + fincome + frace + smoken, data=birthweight)
+
+```
+
+Graphing my residuals. 
+```{r}
+ df_model <- birthweight %>%
+  modelr::add_predictions(bwt_model) %>%
+  modelr::add_residuals(bwt_model)
+
+ggplot(df_model, aes(x = pred, y = resid)) +
+  geom_point(color = "pink") +                          
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") 
+  labs(title = "Residuals vs Fitted Values",
+       x = "Fitted Values (Predicted Salary)",
+       y = "Residuals (Observed - Predicted)") +
+  theme_minimal()
+```
+
+Building the other models. 
+
+```{r}
+main_effects = lm(bwt ~ gaweeks + blength, data=birthweight)|> 
+  broom::tidy() |> 
+  knitr::kable(digits =3)
+
+second_model = lm(bwt ~ bhead + babysex + blength + bhead:babysex:blength, data=birthweight) |> 
+  broom::tidy() |> 
+  knitr::kable(digits=3)
+
+```
+
+
+```
