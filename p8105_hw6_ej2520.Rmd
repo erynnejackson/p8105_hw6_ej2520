@@ -148,5 +148,3 @@ second_model = lm(bwt ~ bhead + babysex + blength + bhead:babysex:blength, data=
 
 ```
 
-
-```

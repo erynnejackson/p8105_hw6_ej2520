@@ -545,7 +545,6 @@ ggplot(df_model, aes(x = pred, y = resid)) +
 second_model = lm(bwt ~ bhead + babysex + blength + bhead:babysex:blength, data=birthweight) |&gt; 
   broom::tidy() |&gt; 
   knitr::kable(digits=3)</code></pre>
-<p>```</p>
 </div>
 
 
